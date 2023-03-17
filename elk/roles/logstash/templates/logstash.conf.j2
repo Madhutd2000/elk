@@ -1,0 +1,26 @@
+input {
+  file {
+    path => [ "/var/log/*.log", "/var/log/messages", "/var/log/syslog", "/etc/httpd/logs/*.log" ]
+    type => "syslog"
+  }
+ tcp {
+    port => 5044
+  }
+}
+
+
+
+           output {
+
+                elasticsearch {
+
+                      hosts => [{%for host in groups['es']%}"http://{{hostvars[host].ansible_host}}:9200"{% if not loop.last %},{% endif %}{% endfor %}]
+                      
+
+                      user => "elastic"
+
+                      password
+
+                  }
+
+          }

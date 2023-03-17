@@ -1,0 +1,118 @@
+---
+- name: Download public signing key
+  shell: rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+- name: Add elk repository file
+  template:
+    src: "templates/elastic.repo.j2"
+
+    dest: "/etc/yum.repos.d/elasticsearch.repo"
+
+    owner: root
+    group: root
+    mode: 0644
+
+      #- name: Disable
+  # shell: yum-config-manager --disable elastic-7x
+
+    #- name: Skip
+  #shell: yum-config-manager --save --setopt=elastic-7x.skip_if_unavailable=true
+
+- name: Install Elastic Search
+  yum:
+   name: elasticsearch
+   state: present
+   enablerepo: elasticsearch
+
+
+- name: Copying the main config file...
+  template: src=templates/elasticsearch.yml.j2 dest={{ elasticsearch_path_etc }}elasticsearch.yml owner=root group=elasticsearch mode=0644
+  become: true
+
+
+- name: Check a certificate of authority
+  stat:
+    path: "{{ elasticsearch_path_etc }}elastic-stack-ca.p12"
+  register: elastic_stack_ca_file
+
+- name: Generate a certificate of authority
+  args:
+    chdir: '{{ elasticsearch_path_etc }}'
+  become: yes
+  command: "'{{ elasticsearch_path_home }}'bin/elasticsearch-certutil ca --out '{{ elasticsearch_path_etc }}'elastic-stack-ca.p12 --pass '{{ elasticsearch_tls_cert_pass }}'"
+  when: not elastic_stack_ca_file.stat.exists and inventory_hostname == 'es1'
+- name: Check a certificate and private key for a node
+  stat:
+    path: "{{ elasticsearch_path_etc }}elastic-certificates.p12"
+  register: elastic_certificates_file
+
+- name: Generate a certificate and private key for a node
+  args:
+    chdir: '{{ elasticsearch_path_etc }}'
+  become: yes
+  command: "'{{ elasticsearch_path_home }}'/bin/elasticsearch-certutil cert --ca '{{ elasticsearch_path_etc }}'elastic-stack-ca.p12 --ca-pass '{{ elasticsearch_tls_cert_pass }}' --out '{{ elasticsearch_path_etc }}'elastic-certificates.p12 --pass '{{ elasticsearch_tls_cert_ca_pass }}'"
+  when: inventory_hostname == 'es1' and not elastic_certificates_file.stat.exists
+
+
+
+#-------------------- copy certs to other nodes---------------
+- name: copy certs to  other nodes
+  include: copy-files.yml
+
+#------------------------Ketstore--------------
+
+- name: create elasticsearch keystore
+  become: yes
+  command: >
+   {{ elasticsearch_path_home }}/bin/elasticsearch-keystore create
+  args:
+   creates: "{{ elasticsearch_path_etc }}elasticsearch.keystore"
+  environment:
+   ES_PATH_CONF: "{{ elasticsearch_path_etc }}"
+
+- name: Set elasticsearch keystore permissions
+  become: yes
+  file: state=file path={{ elasticsearch_path_etc }}elasticsearch.keystore owner={{ es_owner }} group={{ es_group }} mode={{ es_mode }}
+
+- name: Check if elasticsearch keystore is setup
+  become: yes
+  command: >
+   {{ elasticsearch_path_home  }}/bin/elasticsearch-keystore list
+  register: list_keystore
+  changed_when: False
+  environment:
+    ES_PATH_CONF: " {{ elasticsearch_path_etc }} "
+  check_mode: no
+
+- name: Set elastic-certificates.p12 permissions
+  become: yes
+  file: state=file path={{ elasticsearch_path_etc }}elastic-certificates.p12 owner={{ es_owner }} group={{ es_group }} mode=755
+
+
+- name: Add keystore
+  become: yes
+  shell: echo "" | {{ elasticsearch_path_home }}bin/elasticsearch-keystore add xpack.security.transport.ssl.keystore.secure_password
+
+
+- name: Add truststore
+  become: yes
+  shell: echo "" | {{ elasticsearch_path_home }}bin/elasticsearch-keystore add xpack.security.transport.ssl.truststore.secure_password
+
+
+
+# Start Elasticsearch service
+
+- name: Starting Elasticsearch
+  service:
+   name: elasticsearch
+   state: started
+   enabled: yes
+
+
+- name: Generate passwords
+  when: inventory_hostname == 'es1'
+  become: yes
+  shell: yes | {{ elasticsearch_path_home }}bin/elasticsearch-setup-passwords auto >> {{ elasticsearch_path_etc }}/passwords.txt
+
+
+    
