@@ -1,0 +1,35 @@
+---
+#-------------------fetch elastic-stack-ca.p12 from es1-----------
+#
+- name: Fetch the file from the es1 to ansible host
+  run_once: yes
+  fetch:
+    src: "{{elasticsearch_path_etc}}elastic-stack-ca.p12"
+    dest: "{{elastic_certificate_path}}/"
+    flat: yes
+  when: inventory_hostname == 'es1'
+
+- name: Copy the file from ansible host to es2 and es3
+  copy:
+    src: "{{elastic_certificate_path}}/elastic-stack-ca.p12"
+    dest: "{{ elasticsearch_path_etc }}"
+  when: inventory_hostname == "{{ item }}" and not elastic_stack_ca_file.stat.exists
+  with_items: "{{ groups['copies'] }}"
+
+#--------------------------fetch and copy elastic-certificates.p12 ro es1 and es2------------
+#
+#
+- name: Fetch the file from the es1 to ansible host
+  run_once: yes
+  fetch:
+    src: "{{elasticsearch_path_etc}}elastic-certificates.p12"
+    dest: "{{elastic_certificate_path}}/"
+    flat: yes
+  when: inventory_hostname == 'es1'
+
+- name: Copy the file from ansible host to es2 and es3
+  copy:
+    src: "{{elastic_certificate_path}}/elastic-certificates.p12"
+    dest: "{{elasticsearch_path_etc}}"
+  when: inventory_hostname == '{{ item }}'  and not elastic_certificates_file.stat.exists
+  with_items: "{{ groups['copies'] }}"
